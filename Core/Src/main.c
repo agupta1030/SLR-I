@@ -38,7 +38,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define GYRO_SPI_READ  0x80  // 1000 0000 (Sets MSB to 1)
+#define GYRO_SPI_WRITE 0x7F  // 0111 1111 (Clears MSB to 0)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,7 +50,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+volatile uint8_t gyro_data_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -72,7 +73,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	  uint8_t tx_address;
+	  uint8_t rx_response;
+	  SCB_DisableDCache();
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -106,16 +109,61 @@ int main(void)
   MX_TIM6_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  HAL_Delay(50);
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+  HAL_Delay(10);
 
+  tx_address = 0x75 | GYRO_SPI_READ;
+
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+
+  HAL_SPI_Transmit(&hspi1, &tx_address, 1, HAL_MAX_DELAY);
+
+  HAL_SPI_Receive(&hspi1, &rx_response, 1, HAL_MAX_DELAY);
+
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+
+  HAL_Delay(2000);
+  printf("\r\n========================================\r\n");
+  printf("Radiolink F722 IMU Diagnostic Verification\r\n");
+  printf("Target ID Expected: 0x47\r\n");
+  printf("Sensor ID Received: 0x%02X\r\n", rx_response);
+
+  if (rx_response == 0x47) {
+      printf("STATUS: SUCCESS! SPI communication configuration is perfectly valid.\r\n");
+  } else {
+      printf("STATUS: ERROR! Communication fault. Double-check your active SPI Handle number.\r\n");
+  }
+  printf("========================================\r\n\r\n");
+
+  uint8_t write_buffer[2];
+  write_buffer[0] = 0x4E & GYRO_SPI_WRITE;
+  write_buffer[1] = 0x0F;
+
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+
+  HAL_SPI_Transmit(&hspi1, write_buffer, 2, HAL_MAX_DELAY);
+
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
 
+    /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
+	  if(gyro_data_ready){
+		  gyro_data_ready = 0;
+
+		  tx_address = 0x25 | GYRO_SPI_READ;
+		  HAL_SPI_Transmit(&hspi1, &tx_address, 1, HAL_MAX_DELAY);
+		  HAL_SPI_Receive(&hspi1, &rx_response, 6, HAL_MAX_DELAY);
+
+
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -173,7 +221,13 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == GYRO_DRDY_Pin) // Safe check against your custom label
+    {
+        gyro_data_ready = 1;
+    }
+}
 /* USER CODE END 4 */
 
  /* MPU Configuration */
