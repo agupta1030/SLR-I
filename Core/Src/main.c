@@ -150,6 +150,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
   while (1)
   {
 
@@ -165,6 +166,8 @@ int main(void)
 
 	  }
   }
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
   /* USER CODE END 3 */
 }
 
