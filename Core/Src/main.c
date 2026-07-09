@@ -28,7 +28,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,7 +55,6 @@ volatile uint8_t gyro_data_ready = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -75,11 +74,8 @@ int main(void)
   /* USER CODE BEGIN 1 */
 	  uint8_t tx_address;
 	  uint8_t rx_response;
-	  SCB_DisableDCache();
+	  uint8_t gyro_raw[6];
   /* USER CODE END 1 */
-
-  /* MPU Configuration--------------------------------------------------------*/
-  MPU_Config();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -109,40 +105,68 @@ int main(void)
   MX_TIM6_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-  HAL_Delay(50);
+  HAL_Delay(3000);
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
-  HAL_Delay(10);
+  HAL_Delay(50);
 
   tx_address = 0x75 | GYRO_SPI_READ;
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+  HAL_Delay(5); // Hold it low for a tiny moment before clocks start
 
   HAL_SPI_Transmit(&hspi1, &tx_address, 1, HAL_MAX_DELAY);
 
   HAL_SPI_Receive(&hspi1, &rx_response, 1, HAL_MAX_DELAY);
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+  HAL_Delay(5);
 
   HAL_Delay(2000);
-  printf("\r\n========================================\r\n");
-  printf("Radiolink F722 IMU Diagnostic Verification\r\n");
-  printf("Target ID Expected: 0x47\r\n");
-  printf("Sensor ID Received: 0x%02X\r\n", rx_response);
+  static char diagnostic_buf[256];
+    int msg_len = snprintf(diagnostic_buf, sizeof(diagnostic_buf),
+                           "\r\n========================================\r\n"
+                           "Radiolink F722 IMU Diagnostic Verification\r\n"
+                           "Target ID Expected: 0x47\r\n"
+                           "Sensor ID Received: 0x%02X\r\n"
+                           "STATUS: %s\r\n"
+                           "========================================\r\n\r\n",
+                           rx_response,
+                           (rx_response == 0x47) ? "SUCCESS! SPI communication is valid." : "ERROR! Communication fault.");
 
-  if (rx_response == 0x47) {
-      printf("STATUS: SUCCESS! SPI communication configuration is perfectly valid.\r\n");
-  } else {
-      printf("STATUS: ERROR! Communication fault. Double-check your active SPI Handle number.\r\n");
-  }
-  printf("========================================\r\n\r\n");
+    CDC_Transmit_FS((uint8_t*)diagnostic_buf, msg_len);
+    HAL_Delay(100);
 
-  uint8_t write_buffer[2];
-  write_buffer[0] = 0x4E & GYRO_SPI_WRITE;
-  write_buffer[1] = 0x0F;
+  uint8_t init_buf[2];
+  init_buf[0] = 0x4E & GYRO_SPI_WRITE;
+  init_buf[1] = 0x0F;
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
 
-  HAL_SPI_Transmit(&hspi1, write_buffer, 2, HAL_MAX_DELAY);
+  for(volatile int i = 0; i < 50; i++);
+
+  HAL_SPI_Transmit(&hspi1, init_buf, 2, HAL_MAX_DELAY);
+  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
+
+  // INT_CONFIG register (0x14) - Sets up INT1 pin formatting
+	// 0x03 sets INT1 to push-pull, active low (matching your EXTI falling edge)
+	init_buf[0] = 0x14 & GYRO_SPI_WRITE;
+	init_buf[1] = 0x03;
+
+	HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+	for(volatile int i = 0; i < 50; i++);
+	HAL_SPI_Transmit(&hspi1, init_buf, 2, HAL_MAX_DELAY);
+	HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+	HAL_Delay(50);
+
+	// INT_SOURCE0 register (0x65) - Routes data ready to INT1 pin
+	// 0x08 enables UI data ready interrupt routing
+	init_buf[0] = 0x65 & GYRO_SPI_WRITE;
+	init_buf[1] = 0x08;
+
+	HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+	for(volatile int i = 0; i < 50; i++);
+	HAL_SPI_Transmit(&hspi1, init_buf, 2, HAL_MAX_DELAY);
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
@@ -150,24 +174,52 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
   while (1)
   {
 
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
-	  if(gyro_data_ready){
-		  gyro_data_ready = 0;
+  if(gyro_data_ready){
+	  gyro_data_ready = 0;
 
-		  tx_address = 0x25 | GYRO_SPI_READ;
-		  HAL_SPI_Transmit(&hspi1, &tx_address, 1, HAL_MAX_DELAY);
-		  HAL_SPI_Receive(&hspi1, &rx_response, 6, HAL_MAX_DELAY);
+	  // Create an 8-byte buffer to accommodate the address + 6 data bytes safely
+	  uint8_t spi_tx_buf[7] = {0};
+	  uint8_t spi_rx_buf[7] = {0};
 
+	  // Set the first byte to the target register address with the read bit flag
+	  spi_tx_buf[0] = 0x25 | GYRO_SPI_READ;
 
-	  }
+	  // Toggle CS Low to select the IMU
+	  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
+	  for(volatile int i = 0; i < 50; i++); // Safe electrical settling delay
+
+	  // Transmit and receive simultaneously over the 7-byte window
+	  HAL_SPI_TransmitReceive(&hspi1, spi_tx_buf, spi_rx_buf, 7, HAL_MAX_DELAY);
+
+	  // Deselect IMU immediately
+	  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
+
+	  /* * Note: spi_rx_buf[0] contains dummy data returned while we transmitted the address.
+	   * The actual gyro data lives in elements [1] through [6].
+	   */
+	  int16_t gx_raw = (int16_t)((spi_rx_buf[1] << 8) | spi_rx_buf[2]);
+	  int16_t gy_raw = (int16_t)((spi_rx_buf[3] << 8) | spi_rx_buf[4]);
+	  int16_t gz_raw = (int16_t)((spi_rx_buf[5] << 8) | spi_rx_buf[6]);
+
+	  // ICM-42688-P default sensitivity scale factor is 16.4 LSB/dps
+	  float gx_dps = gx_raw / 16.4f;
+	  float gy_dps = gy_raw / 16.4f;
+	  float gz_dps = gz_raw / 16.4f;
+
+	  static char buf[64];
+	  int n = snprintf(buf, sizeof(buf), "gx: %.1f | gy: %.1f | gz: %.1f\r\n", gx_dps, gy_dps, gz_dps);
+	  CDC_Transmit_FS((uint8_t*)buf, n);
+  	  }
+//	  HAL_Delay(1000);
+//	  static char test_msg[] = "USB is alive with peripherals active!\r\n";
+//	  CDC_Transmit_FS((uint8_t*)test_msg, sizeof(test_msg) - 1);
   }
-  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
-  HAL_Delay(50);
   /* USER CODE END 3 */
 }
 
@@ -233,35 +285,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 /* USER CODE END 4 */
 
- /* MPU Configuration */
-
-void MPU_Config(void)
-{
-  MPU_Region_InitTypeDef MPU_InitStruct = {0};
-
-  /* Disables the MPU */
-  HAL_MPU_Disable();
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
-  MPU_InitStruct.BaseAddress = 0x0;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_4GB;
-  MPU_InitStruct.SubRegionDisable = 0x87;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  /* Enables the MPU */
-  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-
-}
-
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
@@ -273,6 +296,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+
   }
   /* USER CODE END Error_Handler_Debug */
 }
