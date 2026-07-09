@@ -74,7 +74,6 @@ int main(void)
   /* USER CODE BEGIN 1 */
 	  uint8_t tx_address;
 	  uint8_t rx_response;
-	  uint8_t gyro_raw[6];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -106,6 +105,10 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(3000);
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
 
@@ -174,6 +177,14 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  float groll = 0;
+  float gpitch = 0;
+  float gyaw = 0;
+
+  float aroll = 0;
+  float apitch = 0;
+  float ayaw = 0;
+
   while (1)
   {
 
@@ -184,18 +195,18 @@ int main(void)
 	  gyro_data_ready = 0;
 
 	  // Create an 8-byte buffer to accommodate the address + 6 data bytes safely
-	  uint8_t spi_tx_buf[7] = {0};
-	  uint8_t spi_rx_buf[7] = {0};
+	  uint8_t spi_tx_buf[15] = {0};
+	  uint8_t spi_rx_buf[15] = {0};
 
 	  // Set the first byte to the target register address with the read bit flag
-	  spi_tx_buf[0] = 0x25 | GYRO_SPI_READ;
+	  spi_tx_buf[0] = 0x1D | GYRO_SPI_READ;
 
 	  // Toggle CS Low to select the IMU
 	  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_RESET);
 	  for(volatile int i = 0; i < 50; i++); // Safe electrical settling delay
 
 	  // Transmit and receive simultaneously over the 7-byte window
-	  HAL_SPI_TransmitReceive(&hspi1, spi_tx_buf, spi_rx_buf, 7, HAL_MAX_DELAY);
+	  HAL_SPI_TransmitReceive(&hspi1, spi_tx_buf, spi_rx_buf, 15, HAL_MAX_DELAY);
 
 	  // Deselect IMU immediately
 	  HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
@@ -203,20 +214,32 @@ int main(void)
 	  /* * Note: spi_rx_buf[0] contains dummy data returned while we transmitted the address.
 	   * The actual gyro data lives in elements [1] through [6].
 	   */
-	  int16_t gx_raw = (int16_t)((spi_rx_buf[1] << 8) | spi_rx_buf[2]);
-	  int16_t gy_raw = (int16_t)((spi_rx_buf[3] << 8) | spi_rx_buf[4]);
-	  int16_t gz_raw = (int16_t)((spi_rx_buf[5] << 8) | spi_rx_buf[6]);
+
+	  int16_t temp_raw = (int16_t)((spi_rx_buf[1] << 8) | spi_rx_buf[2]);
+
+	  int16_t ax_raw = (int16_t)((spi_rx_buf[3] << 8) | spi_rx_buf[4]);
+	  int16_t ay_raw = (int16_t)((spi_rx_buf[5] << 8) | spi_rx_buf[6]);
+	  int16_t az_raw = (int16_t)((spi_rx_buf[7] << 8) | spi_rx_buf[8]);
+
+	  int16_t gx_raw = (int16_t)((spi_rx_buf[9] << 8) | spi_rx_buf[10]);
+	  int16_t gy_raw = (int16_t)((spi_rx_buf[11] << 8) | spi_rx_buf[12]);
+	  int16_t gz_raw = (int16_t)((spi_rx_buf[13] << 8) | spi_rx_buf[14]);
 
 	  // ICM-42688-P default sensitivity scale factor is 16.4 LSB/dps
 	  float gx_dps = gx_raw / 16.4f;
 	  float gy_dps = gy_raw / 16.4f;
 	  float gz_dps = gz_raw / 16.4f;
 
-	  static char buf[64];
-	  int n = snprintf(buf, sizeof(buf), "gx: %.1f | gy: %.1f | gz: %.1f\r\n", gx_dps, gy_dps, gz_dps);
+	  float ax_g = ax_raw / 2048.0f;
+	  float ay_g = ay_raw / 2048.0f;
+	  float az_g = az_raw / 2048.0f;
+
+
+	  static char buf[128];
+	  int n = snprintf(buf, sizeof(buf), "gx: %.1f | gy: %.1f | gz: %.1f\nax: %.1f | ay: %.1f | az: %.1f\r\n", gx_dps, gy_dps, gz_dps, ax_g, ay_g, az_g );
 	  CDC_Transmit_FS((uint8_t*)buf, n);
   	  }
-//	  HAL_Delay(1000);
+  	  //HAL_Delay(1000);
 //	  static char test_msg[] = "USB is alive with peripherals active!\r\n";
 //	  CDC_Transmit_FS((uint8_t*)test_msg, sizeof(test_msg) - 1);
   }
@@ -280,6 +303,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if (GPIO_Pin == GYRO_DRDY_Pin) // Safe check against your custom label
     {
+    	gyro_event_cycles = DWT->CYCCNT;
         gyro_data_ready = 1;
     }
 }
