@@ -51,6 +51,8 @@
 
 /* USER CODE BEGIN PV */
 volatile uint8_t gyro_data_ready = 0;
+volatile uint32_t now_cycles = 0;
+uint32_t last_cycles = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -177,13 +179,12 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  float groll = 0;
-  float gpitch = 0;
-  float gyaw = 0;
+  float g_roll = 0;
+  float g_pitch = 0;
+  float g_yaw = 0;
 
-  float aroll = 0;
-  float apitch = 0;
-  float ayaw = 0;
+  float a_roll = 0;
+  float a_pitch = 0;
 
   while (1)
   {
@@ -193,6 +194,11 @@ int main(void)
     /* USER CODE BEGIN 3 */
   if(gyro_data_ready){
 	  gyro_data_ready = 0;
+
+	  //finding the change in time between gyro measurements
+	  uint32_t dt_cycles = now_cycles - last_cycles;
+	  last_cycles = now_cycles;
+	  float dt_s = dt_cycles/216000000.0f;
 
 	  // Create an 8-byte buffer to accommodate the address + 6 data bytes safely
 	  uint8_t spi_tx_buf[15] = {0};
@@ -230,13 +236,23 @@ int main(void)
 	  float gy_dps = gy_raw / 16.4f;
 	  float gz_dps = gz_raw / 16.4f;
 
+	  g_roll += gx_dps * dt_s;
+	  g_pitch += gy_dps * dt_s;
+	  g_yaw += gz_dps * dt_s;
+
+
 	  float ax_g = ax_raw / 2048.0f;
 	  float ay_g = ay_raw / 2048.0f;
 	  float az_g = az_raw / 2048.0f;
 
+	  a_roll = atan2f(ay_g, az_g) * (180.0f/M_PI);
+	  a_pitch = atan2f(ax_g, az_g) * (180.0f/M_PI);
+
+	  float filtered_roll = 0.98 * (filtered_roll + gx_dps * dt_s) + 0.02 * (a_roll);
+	  float filtered_pitch = 0.98 * (filtered_pitch + gy_dps * dt_s) + 0.02 * (a_pitch);
 
 	  static char buf[128];
-	  int n = snprintf(buf, sizeof(buf), "gx: %.1f | gy: %.1f | gz: %.1f\nax: %.1f | ay: %.1f | az: %.1f\r\n", gx_dps, gy_dps, gz_dps, ax_g, ay_g, az_g );
+	  int n = snprintf(buf, sizeof(buf), "Roll: %.4f | Pitch: %.4f\r\n", filtered_roll, filtered_pitch);
 	  CDC_Transmit_FS((uint8_t*)buf, n);
   	  }
   	  //HAL_Delay(1000);
@@ -303,7 +319,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if (GPIO_Pin == GYRO_DRDY_Pin) // Safe check against your custom label
     {
-    	gyro_event_cycles = DWT->CYCCNT;
+    	now_cycles = DWT->CYCCNT;
         gyro_data_ready = 1;
     }
 }
