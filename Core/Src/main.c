@@ -187,6 +187,9 @@ int main(void)
   float a_roll = 0;
   float a_pitch = 0;
 
+  float filtered_roll = 0;
+  float filtered_pitch = 0;
+
   while (1)
   {
 
@@ -249,8 +252,8 @@ int main(void)
 	  a_roll = atan2f(ay_g, az_g) * (180.0f/M_PI);
 	  a_pitch = atan2f(ax_g, az_g) * (180.0f/M_PI);
 
-	  float filtered_roll = 0.98 * (filtered_roll + gx_dps * dt_s) + 0.02 * (a_roll);
-	  float filtered_pitch = 0.98 * (filtered_pitch + gy_dps * dt_s) + 0.02 * (a_pitch);
+	  filtered_roll = 0.98f * (filtered_roll + gx_dps * dt_s) + 0.02f * (a_roll);
+	  filtered_pitch = 0.98f * (filtered_pitch + gy_dps * dt_s) + 0.02f * (a_pitch);
 
 	  static char buf[128];
 	  int n = snprintf(buf, sizeof(buf), "Roll: %.4f | Pitch: %.4f\r\n", filtered_roll, filtered_pitch);
