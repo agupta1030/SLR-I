@@ -41,7 +41,6 @@
 /* USER CODE BEGIN PD */
 #define GYRO_SPI_READ  0x80  // 1000 0000 (Sets MSB to 1)
 #define GYRO_SPI_WRITE 0x7F  // 0111 1111 (Clears MSB to 0)
-#define CRSF_BUF_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,7 +77,6 @@ int main(void)
   /* USER CODE BEGIN 1 */
 	  uint8_t tx_address;
 	  uint8_t rx_response;
-	  uint8_t crsf_rx_buf[CRSF_BUF_SIZE];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -114,9 +112,12 @@ int main(void)
   DWT->CYCCNT = 0;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
+<<<<<<< HEAD
   //Receiver USART2
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, crsf_rx_buf, CRSF_BUF_SIZE);
 
+=======
+>>>>>>> ae128ec2d31a742f820f9f70e2b7f4e9ce3f6043
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
 
