@@ -231,6 +231,7 @@ int main(void)
 
 	  int16_t temp_raw = (int16_t)((spi_rx_buf[1] << 8) | spi_rx_buf[2]);
 
+
 	  int16_t ax_raw = (int16_t)((spi_rx_buf[3] << 8) | spi_rx_buf[4]);
 	  int16_t ay_raw = (int16_t)((spi_rx_buf[5] << 8) | spi_rx_buf[6]);
 	  int16_t az_raw = (int16_t)((spi_rx_buf[7] << 8) | spi_rx_buf[8]);
