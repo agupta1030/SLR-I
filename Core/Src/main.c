@@ -116,7 +116,6 @@ int main(void)
 
   //Receiver USART2
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, crsf_rx_buf, CRSF_BUF_SIZE);
-  __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);  // suppress half-transfer callback, we only care about idle events
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
@@ -193,8 +192,12 @@ int main(void)
   float a_roll = 0;
   float a_pitch = 0;
 
-  float filtered_roll = 0;
-  float filtered_pitch = 0;
+  float roll_estimate = 0;
+  float pitch_estimate = 0;
+
+  float uncertainty = 0;
+  float gyro_drift_rate = 0.01f;
+  float accel_noise_level = 0.05f;
 
   while (1)
   {
@@ -255,14 +258,27 @@ int main(void)
 	  float ay_g = ay_raw / 2048.0f;
 	  float az_g = az_raw / 2048.0f;
 
+
+
+	  roll_estimate += gx_dps * dt_s;
+	  pitch_estimate += gy_dps * dt_s;
+
+	  uncertainty += gyro_drift_rate * dt_s;
+
+
 	  a_roll = atan2f(ay_g, az_g) * (180.0f/M_PI);
 	  a_pitch = atan2f(ax_g, az_g) * (180.0f/M_PI);
 
-	  filtered_roll = 0.98f * (filtered_roll + gx_dps * dt_s) + 0.02f * (a_roll);
-	  filtered_pitch = 0.98f * (filtered_pitch + gy_dps * dt_s) + 0.02f * (a_pitch);
+	  float a_weight = uncertainty/(uncertainty + accel_noise_level);
+
+	  roll_estimate += a_weight * (a_roll - roll_estimate);
+	  pitch_estimate += a_weight * (a_pitch - pitch_estimate);
+
+	  uncertainty *= (1.0f - a_weight);
+
 
 	  static char buf[128];
-	  int n = snprintf(buf, sizeof(buf), "Roll: %.4f | Pitch: %.4f\r\n", filtered_roll, filtered_pitch);
+	  int n = snprintf(buf, sizeof(buf), "Roll: %.4f | Pitch: %.4f\r\n", roll_estimate, pitch_estimate);
 	  CDC_Transmit_FS((uint8_t*)buf, n);
   	  }
   	  //HAL_Delay(1000);
