@@ -70,8 +70,8 @@ all: main-build
 main-build: SLR-I.elf secondary-outputs
 
 # Tool invocations
-SLR-I.elf SLR-I.map: $(OBJS) $(USER_OBJS) C:\Users\Srivathsa\Documents\STMCUBEMX\ Projects\SLR-I\STM32F722RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "SLR-I.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\Srivathsa\Documents\STMCUBEMX Projects\SLR-I\STM32F722RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SLR-I.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
+SLR-I.elf SLR-I.map: $(OBJS) $(USER_OBJS) C:\Users\vishn\Documents\Github\ Repos\SLR-I\STM32F722RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "SLR-I.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\vishn\Documents\Github Repos\SLR-I\STM32F722RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SLR-I.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
