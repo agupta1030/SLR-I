@@ -41,6 +41,7 @@
 /* USER CODE BEGIN PD */
 #define GYRO_SPI_READ  0x80  // 1000 0000 (Sets MSB to 1)
 #define GYRO_SPI_WRITE 0x7F  // 0111 1111 (Clears MSB to 0)
+#define CRSF_BUF_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +55,10 @@
 volatile uint8_t gyro_data_ready = 0;
 volatile uint32_t now_cycles = 0;
 uint32_t last_cycles = 0;
+
+uint8_t crsf_rx_buf[CRSF_BUF_SIZE];
+uint16_t crsf_channels[16];
+volatile uint8_t crsf_frame_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -111,6 +116,10 @@ int main(void)
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CYCCNT = 0;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+  //receiver USART2 - start circular DMA + idle-line detection
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, crsf_rx_buf, CRSF_BUF_SIZE);
+  __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT); //suppress half-transfer callback, we only care about idle events
 
   HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
@@ -280,6 +289,14 @@ int main(void)
   	  //HAL_Delay(1000);
 //	  static char test_msg[] = "USB is alive with peripherals active!\r\n";
 //	  CDC_Transmit_FS((uint8_t*)test_msg, sizeof(test_msg) - 1);
+
+  	  if (crsf_frame_ready) {
+  		  crsf_frame_ready = 0;
+  		  static char crsf_buf[64];
+  		  int n = snprintf(crsf_buf, sizeof(crsf_buf), "T:%u R:%u P:%u Y:%u\r\n",
+  				  crsf_channels[2], crsf_channels[0], crsf_channels[1], crsf_channels[3]);
+  		  CDC_Transmit_FS((uint8_t*)crsf_buf, n);
+  	  }
   }
   /* USER CODE END 3 */
 }
@@ -344,6 +361,56 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	now_cycles = DWT->CYCCNT;
         gyro_data_ready = 1;
     }
+}
+
+static uint8_t crsf_crc8(const uint8_t *data, uint8_t len) {
+	uint8_t crc = 0;
+	for (uint8_t i = 0; i < len; i++) {
+		crc ^= data[i];
+		for (uint8_t b = 0; b < 8; b++) {
+			crc = (crc & 0x80) ? (crc << 1) ^0xD5 : (crc << 1);
+		}
+ 	}
+	return crc;
+}
+
+static void crsf_parse_frame(uint8_t *buf) {
+	uint8_t len = buf[1];
+	uint8_t type = buf[2];
+
+	if (type!= 0x16) return; //only care about RC Channels for now
+	if (len < 24) return;    //sanity: type(1) + payload(22) + crc(1) = 24
+
+	uint8_t crc_calc = crsf_crc8(&buf[2], len - 1);
+	uint8_t crc_recv = buf[2 + len - 1];
+	if (crc_calc != crc_recv) return; //corrupted frame, drop it silently
+
+	uint8_t *p = &buf[3];
+	uint32_t bitbuf = 0;
+	uint8_t bitcount = 0;
+	uint8_t byte_idx = 0;
+
+	for (int ch = 0; ch < 16; ch++) {
+		while (bitcount < 11) {
+			bitbuf |= ((uint32_t)p[byte_idx++]) << bitcount;
+			bitcount += 8;
+		}
+		crsf_channels[ch] = bitbuf & 0x7FF;
+		bitbuf >>= 11;
+		bitcount -= 11;
+	}
+
+	crsf_frame_ready = 1;
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
+	if (huart->Instance == USART2) {
+		if (Size >= 4 && crsf_rx_buf[0] == 0xC8) {
+			crsf_parse_frame(crsf_rx_buf);
+		}
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart2, crsf_rx_buf, CRSF_BUF_SIZE);
+		__HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
+	}
 }
 /* USER CODE END 4 */
 

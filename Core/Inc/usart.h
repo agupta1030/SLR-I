@@ -35,7 +35,7 @@ extern "C" {
 extern UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN Private defines */
-
+extern DMA_HandleTypeDef hdma_usart2_rx; //manual define to fix the half transfer callback suppression in main.v
 /* USER CODE END Private defines */
 
 void MX_USART2_UART_Init(void);
